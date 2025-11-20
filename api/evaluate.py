@@ -1,34 +1,29 @@
-from flask import Flask, request, jsonify
 from edusco import Edusco, EduscoModel
 from edusco.questions import questions
+from urllib.parse import parse_qs
+import json
 
-app = Flask(__name__)
 edusco = Edusco()
 
-@app.route("/api/evaluate", methods=["POST"])
-def evaluate():
-    data = request.json
-    question_id = data["question_id"]
-    answer = data["answer"]
+def handler(request):
+    try:
+        body = json.loads(request['body'])
+        qid = body.get("qid")
+        answer = body.get("answer", "")
+        
+        question = next((q for q in questions if q["id"] == qid), None)
+        if not question:
+            return {"statusCode": 404, "body": json.dumps({"error": "Soru bulunamadı."})}
 
-    # Soru modelini bul
-    question = next((q for q in questions if q["id"] == question_id), None)
-    if not question:
-        return jsonify({"error": "Soru bulunamadı"}), 404
+        model = EduscoModel(yanitlar=[question["ideal_answer"]])
+        result = edusco.değerlendir(model, answer)
 
-    model = EduscoModel(yanitlar=[question["ideal_answer"]])
-    result = edusco.değerlendir(model, answer)
-    missing_keywords = [k for k in question["keywords"] if k.lower() not in answer.lower()]
+        missing_keywords = [k for k in question["keywords"] if k.lower() not in answer.lower()]
 
-    return jsonify({
-        "duzeltmis": result["duzeltmis"],
-        "skor": result["skor"],
-        "seviye": result["seviye"],
-        "etiket": result["etiket"],
-        "ortak_kelimeler": result["ortak_kelimeler"],
-        "relations": result["relations"],
-        "missing_keywords": missing_keywords
-    })
-
-if __name__ == "__main__":
-    app.run()
+        result.update({"missing_keywords": missing_keywords})
+        return {
+            "statusCode": 200,
+            "body": json.dumps(result, ensure_ascii=False)
+        }
+    except Exception as e:
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
